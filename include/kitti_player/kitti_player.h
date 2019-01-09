@@ -4,6 +4,8 @@
 #include <ros/ros.h>
 #include <nav_msgs/Path.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <Eigen/Geometry>
+#include <thread>
 
 class KittiPlayer
 {
@@ -14,7 +16,8 @@ public:
 
 private:
     void readGroundTruth();
-    void publishPointCloud();
+    bool publishPointCloud();
+    void keyBoardCallback();
 
 private:
     ros::Publisher ground_truth_pub_;

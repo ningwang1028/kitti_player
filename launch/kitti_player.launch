@@ -1,7 +1,7 @@
 <launch>
     <node name="kitti_player" pkg="kitti_player" type="kitti_player" output="screen">
-        <param name="ground_truth_file"        value="/home/ning/data/kitti/dataset/poses/00.txt"/>
-        <param name="point_cloud_file"        value="/home/ning/data/kitti/00/velodyne"/>
-        <param name="publish_freq"        value="2.0"/>
+        <param name="ground_truth_file"        value="/home/ning/data/kitti/dataset/poses/03.txt"/>
+        <param name="point_cloud_file"        value="/home/ning/data/kitti/03/velodyne"/>
+        <param name="publish_freq"        value="5"/>
     </node>
 </launch>

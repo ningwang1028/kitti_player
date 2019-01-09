@@ -1,6 +1,6 @@
 #include "kitti_player.h"
 #include <fstream>
-#include <Eigen/Geometry>
+#include <stdio.h>
 #include <tf/tf.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -21,6 +21,8 @@ KittiPlayer::KittiPlayer() : cloud_idx_(0)
     point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("velodyne_points", 100, true);
 
     readGroundTruth();
+
+    usleep(1000000);
 }
 
 void KittiPlayer::readGroundTruth()
@@ -31,11 +33,19 @@ void KittiPlayer::readGroundTruth()
         exit(1);
     }
 
-    Eigen::Matrix4d pose(Eigen::Matrix4d::Identity());
+    Eigen::Matrix4f velodyne_to_camera = Eigen::Matrix4f::Identity();
+    velodyne_to_camera << 4.276802385584e-04, -9.999672484946e-01, -8.084491683471e-03,-1.198459927713e-02,
+                           -7.210626507497e-03, 8.081198471645e-03, -9.999413164504e-01, -5.403984729748e-02,
+                           9.999738645903e-01, 4.859485810390e-04, -7.206933692422e-03, -2.921968648686e-01;
+    Eigen::Matrix4f camera_to_velodyne = Eigen::Isometry3f(velodyne_to_camera).inverse().matrix();
+
     while(!trajectory_stream.eof()) {
+
+        Eigen::Matrix4f pose(Eigen::Matrix4f::Identity());
         trajectory_stream >> pose(0, 0) >> pose(0, 1) >> pose(0, 2) >> pose(0, 3)
                           >> pose(1, 0) >> pose(1, 1) >> pose(1, 2) >> pose(1, 3)
                           >> pose(2, 0) >> pose(2, 1) >> pose(2, 2) >> pose(2, 3);
+        pose = camera_to_velodyne * pose * velodyne_to_camera;
 
         trajectory_stream.get();
         if(trajectory_stream.peek() == '/n') {
@@ -45,9 +55,9 @@ void KittiPlayer::readGroundTruth()
         geometry_msgs::PoseStamped pose_msg;
         pose_msg.header.stamp = ros::Time::now();
         pose_msg.header.frame_id = map_frame_;
-        pose_msg.pose.position.x = pose(2, 3);
-        pose_msg.pose.position.y = -pose(0, 3);
-        pose_msg.pose.position.z = -pose(1, 3);
+        pose_msg.pose.position.x = pose(0, 3);
+        pose_msg.pose.position.y = pose(1, 3);
+        pose_msg.pose.position.z = pose(2, 3);
 
         tf::Matrix3x3 R;
         double roll, pitch, yaw;
@@ -71,15 +81,19 @@ void KittiPlayer::readGroundTruth()
     }
 }
 
-void KittiPlayer::publishPointCloud()
+bool KittiPlayer::publishPointCloud()
 {
-    std::cout << "Sequence: " << cloud_idx_;
     std::stringstream ss;
     ss << std::setw(6) << std::setfill('0') << cloud_idx_ << ".bin";
     std::string file_name = point_cloud_file_ + "/" + ss.str();
     cloud_idx_++;
 
-    std::fstream input(file_name, std::ios::in | std::ios::binary);
+    std::ifstream input(file_name, std::ios::in | std::ios::binary);
+
+    if(!input.is_open()) {
+        return false;
+    }
+
     input.seekg(0, std::ios::beg);
 
     pcl::PointCloud<pcl::PointXYZI> cloud;
@@ -91,13 +105,15 @@ void KittiPlayer::publishPointCloud()
         cloud.push_back(point);
     }
     input.close();
-    std::cout << " Cloud size: " << cloud.size() << std::endl;
+    std::cout << "Sequence: " << cloud_idx_ <<  " Cloud size: " << cloud.size() << std::endl;
 
     sensor_msgs::PointCloud2 point_cloud_msg;
     pcl::toROSMsg(cloud, point_cloud_msg);
     point_cloud_msg.header.stamp = ros::Time::now();
     point_cloud_msg.header.frame_id = lidar_frame_;
     point_cloud_pub_.publish(point_cloud_msg);
+
+    return true;
 }
 
 void KittiPlayer::loop()
@@ -105,7 +121,9 @@ void KittiPlayer::loop()
     ros::Rate rate(publish_freq_);
 
     while(ros::ok()) {
-        publishPointCloud();
+        if(!publishPointCloud())
+            return;
+
         rate.sleep();
     }
 }
