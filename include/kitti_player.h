@@ -5,7 +5,6 @@
 #include <nav_msgs/Path.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <Eigen/Geometry>
-#include <thread>
 
 class KittiPlayer
 {
@@ -17,7 +16,6 @@ public:
 private:
     void readGroundTruth();
     bool publishPointCloud();
-    void keyBoardCallback();
 
 private:
     ros::Publisher ground_truth_pub_;

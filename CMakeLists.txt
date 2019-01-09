@@ -16,7 +16,7 @@ catkin_package(
 
 include_directories(
   src
-  include/kitti_player
+  include
   "/usr/include/eigen3"
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}

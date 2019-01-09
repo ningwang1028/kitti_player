@@ -22,7 +22,7 @@ KittiPlayer::KittiPlayer() : cloud_idx_(0)
 
     readGroundTruth();
 
-    usleep(1000000);
+    usleep(2000000);
 }
 
 void KittiPlayer::readGroundTruth()
