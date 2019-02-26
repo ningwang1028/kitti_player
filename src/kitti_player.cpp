@@ -5,8 +5,10 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <opencv2/imgcodecs.hpp>
+#include <cv_bridge/cv_bridge.h>
 
-KittiPlayer::KittiPlayer() : cloud_idx_(0)
+KittiPlayer::KittiPlayer()
 {
     ros::NodeHandle nh;
     ros::NodeHandle private_nh("~");
@@ -14,11 +16,20 @@ KittiPlayer::KittiPlayer() : cloud_idx_(0)
     private_nh.param("publish_freq", publish_freq_, 2.0);
     private_nh.param("lidar_frame", lidar_frame_, std::string("velodyne"));
     private_nh.param("map_frame", map_frame_, std::string("map"));
-    private_nh.param("ground_truth_file", ground_truth_file_, std::string("/home/kitti/dataset/poses/00.txt"));
-    private_nh.param("point_cloud_file", point_cloud_file_, std::string("/home/kitti/00/velodyne"));
+
+    private_nh.param("kitti_sequence", kitti_sequence_, 0);
+    private_nh.param("kitti_dataset_dir", kitti_dataset_dir_, std::string("/home/ning/data/kitti"));
+
+    std::stringstream ss;
+    ss << std::setw(2) << std::setfill('0') << kitti_sequence_;
+    ground_truth_file_ = kitti_dataset_dir_ + "/dataset/poses/" + ss.str() + ".txt";
+    point_cloud_file_ = kitti_dataset_dir_ + "/" + ss.str() + "/velodyne";
+    image_file_ = kitti_dataset_dir_ + "/" + ss.str() + "/image_0";
+    calibration_file_ = kitti_dataset_dir_ + "/calibration/sequences/" + ss.str() + "/calib.txt";
 
     ground_truth_pub_ = nh.advertise<nav_msgs::Path>("ground_truth", 1, true);
-    point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("velodyne_points", 100, true);
+    point_cloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("velodyne_points", 10, true);
+    image_pub_ = nh.advertise<sensor_msgs::Image>("image_raw", 10, true);
 
     readGroundTruth();
 
@@ -30,13 +41,30 @@ void KittiPlayer::readGroundTruth()
     std::ifstream trajectory_stream(ground_truth_file_);
     if(!trajectory_stream.is_open()) {
         std::cout << "could not open " << ground_truth_file_ << std::endl;
-        exit(1);
+        return;
     }
 
+    std::ifstream calibration_stream(calibration_file_);
+    if(!calibration_stream) {
+        std::cout << "could not open " << calibration_file_ << std::endl;
+    }
+    std::string line;
+    while(std::getline(calibration_stream, line)) {
+        if(line.substr(0, 3).compare("Tr:") == 0) {
+            break;
+        }
+    }
+    if(line.substr(0, 3).compare("Tr:") != 0) {
+        std::cout << "error calibration file!" << std::endl;
+        return;
+    }
+
+    std::stringstream ss(line.substr(3));
     Eigen::Matrix4f velodyne_to_camera = Eigen::Matrix4f::Identity();
-    velodyne_to_camera << 4.276802385584e-04, -9.999672484946e-01, -8.084491683471e-03,-1.198459927713e-02,
-                           -7.210626507497e-03, 8.081198471645e-03, -9.999413164504e-01, -5.403984729748e-02,
-                           9.999738645903e-01, 4.859485810390e-04, -7.206933692422e-03, -2.921968648686e-01;
+    ss >> velodyne_to_camera(0, 0) >> velodyne_to_camera(0, 1) >> velodyne_to_camera(0, 2) >> velodyne_to_camera(0, 3)
+       >> velodyne_to_camera(1, 0) >> velodyne_to_camera(1, 1) >> velodyne_to_camera(1, 2) >> velodyne_to_camera(1, 3)
+       >> velodyne_to_camera(2, 0) >> velodyne_to_camera(2, 1) >> velodyne_to_camera(2, 2) >> velodyne_to_camera(2, 3);
+    std::cout << velodyne_to_camera << std::endl;
     Eigen::Matrix4f camera_to_velodyne = Eigen::Isometry3f(velodyne_to_camera).inverse().matrix();
 
     while(!trajectory_stream.eof()) {
@@ -81,12 +109,30 @@ void KittiPlayer::readGroundTruth()
     }
 }
 
-bool KittiPlayer::publishPointCloud()
+bool KittiPlayer::publishImage(const ros::Time& time, int idx)
 {
     std::stringstream ss;
-    ss << std::setw(6) << std::setfill('0') << cloud_idx_ << ".bin";
+    ss << std::setw(6) << std::setfill('0') << idx << ".png";
+    std::string file_name = image_file_ + "/" + ss.str();
+
+    cv::Mat image = cv::imread(file_name, 0);
+    if(image.empty()) {
+        return false;
+    }
+
+    std_msgs::Header header;
+    header.stamp = time;
+    sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", image).toImageMsg();
+    image_pub_.publish(image_msg);
+
+    return true;
+}
+
+bool KittiPlayer::publishPointCloud(const ros::Time& time, int idx)
+{
+    std::stringstream ss;
+    ss << std::setw(6) << std::setfill('0') << idx << ".bin";
     std::string file_name = point_cloud_file_ + "/" + ss.str();
-    cloud_idx_++;
 
     std::ifstream input(file_name, std::ios::in | std::ios::binary);
 
@@ -105,11 +151,10 @@ bool KittiPlayer::publishPointCloud()
         cloud.push_back(point);
     }
     input.close();
-    std::cout << "Sequence: " << cloud_idx_ <<  " Cloud size: " << cloud.size() << std::endl;
 
     sensor_msgs::PointCloud2 point_cloud_msg;
     pcl::toROSMsg(cloud, point_cloud_msg);
-    point_cloud_msg.header.stamp = ros::Time::now();
+    point_cloud_msg.header.stamp = time;
     point_cloud_msg.header.frame_id = lidar_frame_;
     point_cloud_pub_.publish(point_cloud_msg);
 
@@ -121,9 +166,15 @@ void KittiPlayer::loop()
     ros::Rate rate(publish_freq_);
 
     while(ros::ok()) {
-        if(!publishPointCloud())
+        ros::Time t = ros::Time::now();
+        std::cout << "Sequence: " << idx_ << std::endl;
+        if(!publishPointCloud(t, idx_))
             return;
 
+//        if(!publishImage(t, idx_))
+//            return;
+
+        idx_++;
         rate.sleep();
     }
 }

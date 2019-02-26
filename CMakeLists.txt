@@ -7,9 +7,11 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -o3")
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
+  cv_bridge
 )
 
 find_package(PCL REQUIRED)
+find_package(OpenCV REQUIRED)
 
 catkin_package(
 )
@@ -20,6 +22,7 @@ include_directories(
   "/usr/include/eigen3"
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 add_executable(kitti_player
@@ -31,6 +34,7 @@ add_executable(kitti_player
 target_link_libraries(kitti_player
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
+  ${OpenCV_LIBRARIES}
 )
 
 install(TARGETS kitti_player
